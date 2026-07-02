@@ -15,8 +15,7 @@
 
 ## 🚧 进行中 / 待办
 
-- **被 2bti(前端 SPA)消费**:把 2bti 从「服务端 /agent 端点」切到「客户端直连 DeepSeek」,绕开 CF Worker 在国内的慢/限速(在 2bti 仓开 PR)。⚠️ **只能走每用户 BYOK**(用户自带 key)—— 不能把 app 共享 key 打进 bundle(DeepSeek 会自动禁用泄露的 key,见 skill `deepseek-api-key` 红线)。若 2bti 想「零配置直接用」,得先想清 key 怎么来(用户自带 / 服务端代理注入),这是消费前要老板拍板的架构点。
-- **key 供给方案**(待老板拍板):每用户 BYOK(设置项填 key)vs. 保留服务端代理持 key。二者取舍决定 2bti 是否/如何用本包。
+- **被 2bti(前端 SPA)消费**:把 2bti 从「服务端 /agent 端点」切到「客户端直连 DeepSeek」,绕开 CF Worker 在国内的慢/限速(在 2bti 仓开 PR)。**key 方案已定 = 嵌入 app 自己的 key**(构建期注入、不进 git 源码;接受暴露风险,缓解 = 专用低额度 key + 监控 + 轮换)。`createClientAgent({apiKey})` 也支持每用户 BYOK 作为更安全可选项,但 2bti 走嵌入。
 - **可选 sessionStorage / 自定义 store 预设**:除 localStorage 外,给 sessionStorage(会话级)与 IndexedDB 适配器留口子。
 - **流式输出**:随上游 `@agentaily/agent-loop` 的 `agent.stream()` 落地后,补客户端打字机示例。
 - **用法 skill 软链**:`ln -s ~/agentaily/agent-loop-client/skill ~/.claude/skills/agentaily-agent-loop-client`(见 skill 内说明)。

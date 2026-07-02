@@ -8,19 +8,23 @@ A thin companion to [`@agentaily/agent-loop`](https://github.com/agentaily/agent
 - **Data stays local** — sessions and memory live in `localStorage`; nothing is sent anywhere but the model API.
 - **One import** — re-exports the whole `@agentaily/agent-loop` surface, so consumers usually import just this package.
 
-## 🔴 Key handling — read this first (per-user BYOK only)
+## Key handling — two ways to supply the DeepSeek key
 
-Whatever key you pass to `createClientAgent` **runs in the browser and is visible in network traffic.** DeepSeek treats this seriously:
+Whatever key you pass to `createClientAgent` **runs in the browser and is visible in network traffic.** That's inherent to the no-server design. There are two legitimate ways to supply it — pick per product:
 
-> DeepSeek's console: *"Do not expose your API key in browsers or other client-side code… to protect your account, we may **automatically disable API keys we find have been publicly leaked**."*
+**1. Embed the app's own key (default — what `2bti` does).** Inject a shared, app-owned DeepSeek key at **build time** (e.g. a `VITE_DEEPSEEK_KEY` from a CI/build secret — kept out of git source, but it does ship in the public bundle). Simplest UX: users just chat, no setup. You accept that the key is exposed, and **mitigate**:
 
-So the **only** safe way to use this package is **per-user BYOK**: the end user supplies **their own** DeepSeek key at runtime (a settings field), you store it in **their** `localStorage`, and it never enters your repo or public bundle. That's not a public leak — it's the user's key, in the user's browser, at their own risk.
+- use a **dedicated, low-budget key** (not your main account key) so the blast radius of abuse is capped;
+- **monitor spend** and set alerts;
+- **rotate** the key on a schedule (and immediately if you see abuse).
 
-**Do NOT bake a shared, app-owned key into the frontend** (e.g. a build-time `VITE_DEEPSEEK_KEY`). DeepSeek's scanner will find it and **disable it**, breaking the app for everyone — this is not something "a low-budget key + monitoring" fixes. If your product can't ask each user for their own key, keep the key **server-side** behind a proxy / Worker (use `@agentaily/agent-loop` on the server) and don't use this package.
+> Heads-up: a key that ships in a public bundle can be scraped, and DeepSeek may auto-disable a key it detects as publicly leaked — the rotation + monitoring above are exactly how you stay ahead of that. Don't use a key you can't afford to have leaked or disabled.
 
-See the [`deepseek-api-key`] discipline and this package's usage skill for the full rationale.
+**2. Per-user BYOK (more secure, optional).** The end user pastes **their own** DeepSeek key at runtime (a settings field); you store it in **their** `localStorage`. Nothing app-owned is exposed and there's no shared key to abuse — at the cost of asking each user for a key. Good when you can't or don't want to fund usage centrally.
 
-First consumer: the [`2bti`](https://2bti.agentaily.com) SPA (per-user BYOK).
+Either way the API is the same — `createClientAgent({ apiKey })`; only where `apiKey` comes from differs. If a key must stay secret (app-owned and you can't tolerate exposure), don't put it in the browser at all: keep it **server-side** behind a proxy / Worker running `@agentaily/agent-loop`.
+
+First consumer: the [`2bti`](https://2bti.agentaily.com) SPA (embedded app key).
 
 ## Install
 
@@ -35,9 +39,9 @@ npm i @agentaily/agent-loop-client
 ```ts
 import { createClientAgent } from '@agentaily/agent-loop-client'
 
-// BYOK: the key comes from the user (a settings field), stored in THEIR
-// localStorage — never a build-time constant baked into the bundle.
-const apiKey = localStorage.getItem('deepseek_key') ?? promptUserForKey()
+// Default: the app's own key, injected at build time (kept out of git source).
+// For per-user BYOK, read the user's key from localStorage instead — same call.
+const apiKey = import.meta.env.VITE_DEEPSEEK_KEY
 
 const agent = createClientAgent({
   apiKey,
@@ -69,7 +73,7 @@ new Agent({
 
 | option | default | notes |
 | --- | --- | --- |
-| `apiKey` | — | **required**; DeepSeek key — must be the **user's own** key (BYOK), never a baked-in shared key (see above) |
+| `apiKey` | — | **required**; DeepSeek key — an embedded app key or the user's own (see [Key handling](#key-handling--two-ways-to-supply-the-deepseek-key)) |
 | `model` | `deepseek()` default | DeepSeek model id |
 | `instructions` | — | base system prompt (persona / rules) |
 | `storage` | `globalThis.localStorage` | any `StorageLike`; inject for SSR / tests |
@@ -129,9 +133,10 @@ const { text, session } = await agent.run({ message, sessionId })
 ```
 
 You trade a server round-trip (and key secrecy) for latency and offline-friendly
-local state — but only do this when the key is the **user's own** (BYOK). If the
-key is app-owned and secret, keep the Worker path; a baked-in DeepSeek key gets
-auto-disabled (see the key-handling section above).
+local state. The key then lives in the browser — supply it as an embedded app
+key (with a dedicated low-budget key + monitoring + rotation) or via per-user
+BYOK (see [Key handling](#key-handling--two-ways-to-supply-the-deepseek-key)).
+If a key must stay secret and you can't tolerate exposure, keep the Worker path.
 
 ## Develop
 

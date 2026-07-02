@@ -15,20 +15,19 @@ description: 在任意前端仓消费 @agentaily/agent-loop-client —— 让 @a
 
 **动机:** CF Worker 在中国国内(尤其移动端)访问慢 / 被限速;DeepSeek 本身是国内服务,浏览器直连很快。**绕开服务器 = 国内快 + 数据本地**。首个消费方是 **2bti**(前端 SPA)。
 
-## 🔴 头号红线:只能【每用户 BYOK】,绝不打进公开 bundle
+## key 怎么给:两种正当用法
 
-客户端直连 = **传给 `createClientAgent` 的 key 明文出现在浏览器**(网络请求里就能扒到)。DeepSeek 对此有**硬约束**(控制台原文):
+客户端直连 = **传给 `createClientAgent` 的 key 明文出现在浏览器**(网络请求里能扒到),这是「无服务器」的固有代价。两种正当用法,按产品选:
 
-> 「不要将 API key 暴露在浏览器或其他客户端代码中……为了保护你的帐户安全,**我们可能会自动禁用我们发现已公开泄露的 API key**。」
+**① 嵌入 app 自己的 key(默认 · 2bti 就这么用)**
+- 在**构建期**注入一把**共享的、app 自己的** DeepSeek key(如 `VITE_DEEPSEEK_KEY` 来自 CI/构建 secret —— **不进 git 源码**,但确实会随公开 bundle ship)。UX 最简:用户直接聊、零配置。
+- 你接受 key 暴露,并**缓解**:**用专用低额度 key**(不是主账号大额 key,把盗刷面积框小)+ **监控消耗、设告警** + **定期轮换**(发现异常立刻换)。
+- ⚠️ 随公开 bundle ship 的 key 可能被爬,DeepSeek 也可能**自动禁用它检测到已公开泄露的 key** —— 上面的轮换 + 监控正是为此兜底。别用「泄露/被禁了担不起」的 key。
 
-后果不是「被盗刷、低额度 key + 监控就能兜」那么轻 —— 是 **DeepSeek 官方主动扫描、【停用】泄露的 key** → 打进公开前端 bundle = key 随时被禁 = **app 直接挂**。
+**② 每用户 BYOK(更安全 · 可选)**
+- 终端用户**运行时**填**自己的** key(设置项),存进**他自己的 `localStorage`**;没有 app 自己的 key 暴露、没有共享 key 可被盗刷。代价:得让每个用户自备 key。适合不想/不能集中掏钱跑量时。
 
-**所以本包唯一安全的用法 = 每用户 BYOK:**
-- 终端用户在**运行时**填**自己的** DeepSeek key(设置项),存进**他自己浏览器的 `localStorage`**,**永不进你的仓库 / 公开 bundle**。这不算「公开泄露」——是用户自己的 key、在用户自己的浏览器里、风险自负。
-- **绝不**把一个**共享的、app 自己的** key 打进前端(如 build-time `VITE_DEEPSEEK_KEY`)—— 会被 DeepSeek 扫到禁用,全员挂。
-- 产品**没法让每个用户自带 key**时 → key 只能**服务端/代理持有**(CF Worker 里跑 `@agentaily/agent-loop`),前端只调你自己的 endpoint,**别用本包**。
-
-配套见 skill **`deepseek-api-key`**(🔴 红线:DeepSeek key 不进公开客户端)。
+两种用法**API 完全一样**——都是 `createClientAgent({ apiKey })`,只是 `apiKey` 从哪来不同。真要「key 必须保密、暴露担不起」→ 别放浏览器,回**服务端/代理持有**(CF Worker 跑 `@agentaily/agent-loop`)。配套见 skill **`deepseek-api-key`**。
 
 ## 装哪 / 导出什么
 
@@ -46,11 +45,11 @@ npm i @agentaily/agent-loop-client
 ```ts
 import { createClientAgent } from '@agentaily/agent-loop-client'
 
-// BYOK:key 来自用户(设置项),存用户自己的 localStorage —— 不是打进 bundle 的常量
-const apiKey = localStorage.getItem('deepseek_key') ?? promptUserForKey()
+// 默认:app 自己的 key,构建期注入(不进 git 源码)。BYOK 则改从用户的 localStorage 读,调用一样。
+const apiKey = import.meta.env.VITE_DEEPSEEK_KEY
 
 const agent = createClientAgent({
-  apiKey,                                       // 🔴 必须是【用户自带】的 key(见头号红线)
+  apiKey,                                       // 来源见「key 怎么给」两种用法
   instructions: '你是一个简洁友好的助手。',
 })
 
@@ -103,11 +102,11 @@ const { text, sessionId } = await r.json()
 const agent = createClientAgent({ apiKey: DEEPSEEK_KEY })
 const { text, session } = await agent.run({ message, sessionId })
 ```
-换来:**去掉服务器 round-trip(国内快)+ 状态本地化**;代价:**key 暴露 → 只能每用户 BYOK**(见头号红线)。**反向**:凡 key 是 app 自己的、必须保密的调用,保留服务端 `/agent` 那条路,别搬进前端。
+换来:**去掉服务器 round-trip(国内快)+ 状态本地化**;代价:**key 进浏览器**——按「key 怎么给」选嵌入 app key(专用低额度 key + 监控 + 轮换)或每用户 BYOK。**反向**:凡 key 必须保密、暴露担不起的调用,保留服务端 `/agent` 那条路,别搬进前端。
 
 ## 坑 / 注意
 
-- **key 暴露 → 只能每用户 BYOK**(见「头号红线」)—— 这是本包最重要的约束;共享 app key 打进 bundle 会被 DeepSeek 自动禁用。
+- **key 会进浏览器**(见「key 怎么给」)—— 这是本包最重要的取舍;嵌入 app key 就务必配专用低额度 key + 监控 + 轮换(公开 bundle 里的 key 可能被爬 / 被 DeepSeek 检测泄露而禁用,靠轮换兜底)。
 - **`localStorage` 是同步的**:适配器用 `async` 方法把同步读写包成 Promise 满足接口;单标签页够用。**多标签页并发写同一 session** 无锁,极端情况下后写覆盖前写(单用户聊天基本无碍)。
 - **`localStorage` 有容量上限**(通常 ~5MB/域)且**明文**:别往 memory 里塞敏感大数据;长对话累积到上限会 `setItem` 抛错。
 - **`memory.list()` 遍历 storage 全部 key 按 prefix 过滤**:同一 storage 里 session 与 memory 靠不同 prefix 隔离,别把两者 prefix 设成一样。
