@@ -1,6 +1,6 @@
 {
   "name": "@agentaily/agent-loop-client",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Run the agentaily agent loop directly in the browser — DeepSeek direct, localStorage-backed sessions + memory, no server. Companion to @agentaily/agent-loop.",
   "type": "module",
   "license": "MIT",
