@@ -1,0 +1,76 @@
+name: Release
+
+# Changesets-driven release. On push to main this either opens/updates a
+# "Version Packages" PR (consuming pending changesets) or, once that PR is
+# merged, publishes to npm and creates the GitHub Release.
+#
+# The Version PR is opened with a GitHub App token (agentaily-release-bot), NOT
+# GITHUB_TOKEN: PRs opened by GITHUB_TOKEN never trigger new workflows, so their
+# CI never runs and they can't auto-merge. The App identity lets CI run; the
+# auto-merge step then merges the PR once it's green — no human clicks.
+on:
+  push:
+    branches: [main]
+
+# Avoid overlapping version PRs / publishes.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write # push the Version PR branch + create GitHub Releases
+  pull-requests: write # open/update the Version Packages PR
+  id-token: write # OIDC for npm trusted publishing + provenance
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      # App token → the Version PR is authored by agentaily-release-bot, so its
+      # CI runs automatically (GITHUB_TOKEN-authored PRs would stay stuck on
+      # "1 workflow awaiting approval").
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # changesets needs full history
+          token: ${{ steps.app-token.outputs.token }} # push the Version branch as the App
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - run: npm install -g npm@latest # ensure trusted-publishing support
+      - run: npm ci
+      - uses: changesets/action@v1
+        id: changesets
+        with:
+          version: npx changeset version # bump + changelog in the Version PR
+          publish: npm run release # `changeset publish` once versions land
+          commit: "chore: version packages"
+          title: "chore: version packages"
+          createGithubReleases: true
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }} # open/update the PR + GH Release as the App
+          NPM_CONFIG_PROVENANCE: "true" # signed provenance (needs id-token: write above)
+          # Auth: the vault's granular npm token (@agentaily read+write, 2FA-bypass)
+          # stored as the NPM_TOKEN secret. IMPORTANT: changesets/action keys on the
+          # env var literally named NPM_TOKEN to use token auth; naming it
+          # NODE_AUTH_TOKEN makes the action ignore it and fall back to OIDC
+          # trusted publishing (see skill publish-npm-package / changesets-auto-release).
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # Once the Version PR exists, queue auto-merge — GitHub merges it the
+      # moment required checks go green. The post-merge run (no pending
+      # changesets, so no PR) skips this step.
+      # `--auto` only works while the PR is NOT yet mergeable (it queues a merge
+      # to fire when required checks pass). This repo's Version PR branch has no
+      # required checks, so it's born CLEAN and `--auto` is rejected with
+      # "Pull request is in clean status" — so fall back to a direct squash merge.
+      - name: Auto-merge the Version PR once CI is green
+        if: steps.changesets.outputs.pullRequestNumber
+        run: gh pr merge --squash --auto "$PR" || gh pr merge --squash "$PR"
+        env:
+          PR: ${{ steps.changesets.outputs.pullRequestNumber }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
